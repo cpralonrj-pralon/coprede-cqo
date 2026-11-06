@@ -1,0 +1,206 @@
+// =============================================================================
+// COP REDE - CQO (CENTRAL DE QUALIDADE OPERACIONAL)
+// PRISMA ORM SCHEMA
+// Compatível com PostgreSQL 14+, Supabase, AWS RDS, CockroachDB
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProcessType {
+  Outages
+  Baixas_Offline   @map("Baixas Offline")
+  Acionamentos
+  Escalonamentos
+  Tratativa_GPON   @map("Tratativa GPON")
+  Outros
+}
+
+enum DeviationSeverity {
+  Conforme
+  Nao_Conforme     @map("Não Conforme")
+  Desvio_Grave     @map("Desvio Grave")
+}
+
+enum ActionPlanStatus {
+  Em_andamento     @map("Em andamento")
+  Concluidas       @map("Concluídas")
+  Atrasadas
+  Escalada_D5      @map("Escalada D+5")
+  Escalada_D10     @map("Escalada D+10")
+}
+
+enum CertificationTier {
+  Bronze
+  Prata
+  Ouro
+  Diamante
+}
+
+enum NotificationSeverity {
+  info
+  warning
+  critical
+  escalation
+}
+
+enum UserRole {
+  ADMIN
+  AUDITOR_CQO
+  GERENTE_EXECUTIVO
+  SUPERVISOR
+  ANALISTA
+}
+
+model User {
+  id              String         @id @default(uuid())
+  name            String         @db.VarChar(150)
+  email           String         @unique @db.VarChar(200)
+  role            UserRole       @default(ANALISTA)
+  supervisorId    String?        @map("supervisor_id")
+  supervisor      User?          @relation("SupervisorSupervisees", fields: [supervisorId], references: [id])
+  supervisees     User[]         @relation("SupervisorSupervisees")
+  regional        String         @db.VarChar(100)
+  cluster         String         @db.VarChar(100)
+  technology      String         @db.VarChar(100)
+  avatarColor     String?        @default("bg-blue-600") @map("avatar_color") @db.VarChar(50)
+  active          Boolean        @default(true)
+  auditsAsAnalyst Audit[]        @relation("AuditsAsAnalyst")
+  auditsAsSuper   Audit[]        @relation("AuditsAsSupervisor")
+  actionPlansWho  ActionPlan[]   @relation("ActionPlansSupervisor")
+  certifications  Certification[]
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model DeviationType {
+  id              String         @id
+  code            String         @unique @db.VarChar(30)
+  name            String         @db.VarChar(200)
+  category        String         @default("Geral") @db.VarChar(50)
+  severityDefault String         @default("Não Conforme") @map("severity_default") @db.VarChar(30)
+  weight          Int            @default(15)
+  description     String?        @db.Text
+  active          Boolean        @default(true)
+  audits          Audit[]
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@map("deviation_types")
+}
+
+model Audit {
+  id                String            @id
+  protocol          String            @db.VarChar(50)
+  process           ProcessType
+  analystId         String?           @map("analyst_id")
+  analyst           User?             @relation("AuditsAsAnalyst", fields: [analystId], references: [id])
+  analystName       String            @map("analyst_name") @db.VarChar(150)
+  supervisorId      String?           @map("supervisor_id")
+  supervisor        User?             @relation("AuditsAsSupervisor", fields: [supervisorId], references: [id])
+  supervisorName    String            @map("supervisor_name") @db.VarChar(150)
+  cluster           String            @db.VarChar(100)
+  technology        String            @db.VarChar(100)
+  regional          String            @db.VarChar(100)
+  score             Decimal           @db.Decimal(5, 2)
+  status            DeviationSeverity
+  deviationTypeId   String?           @map("deviation_type_id")
+  deviationType     DeviationType?    @relation(fields: [deviationTypeId], references: [id], onDelete: SetNull)
+  deviationTypeName String?           @map("deviation_type_name") @db.VarChar(200)
+  date              DateTime          @default(now()) @db.Date
+  observations      String?           @db.Text
+  actionPlans       ActionPlan[]
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  @@index([protocol])
+  @@index([date])
+  @@index([process])
+  @@index([status])
+  @@map("audits")
+}
+
+model ActionPlan {
+  id                String            @id
+  auditId           String            @map("audit_id")
+  audit             Audit             @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  protocol          String            @db.VarChar(50)
+  analystName       String            @map("analyst_name") @db.VarChar(150)
+  supervisorId      String?           @map("supervisor_id")
+  supervisor        User?             @relation("ActionPlansSupervisor", fields: [supervisorId], references: [id])
+  supervisorName    String            @map("supervisor_name") @db.VarChar(150)
+  process           ProcessType
+  deviationTypeName String            @map("deviation_type_name") @db.VarChar(200)
+  description       String?           @db.Text
+  rootCause         String            @map("root_cause") @db.Text
+  what              String            @db.Text
+  why               String            @db.Text
+  who               String            @db.VarChar(150)
+  targetDate        DateTime          @map("target_date") @db.Date
+  daysOpen          Int               @default(0) @map("days_open")
+  escalationLevel   Int               @default(0) @map("escalation_level")
+  status            ActionPlanStatus  @default(Em_andamento)
+  firstResponseAt   DateTime?         @map("first_response_at")
+  resolvedAt        DateTime?         @map("resolved_at")
+  notifications     Notification[]
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([escalationLevel])
+  @@index([auditId])
+  @@map("action_plans")
+}
+
+model Certification {
+  id                    String            @id
+  userId                String?           @map("user_id")
+  user                  User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analystName           String            @map("analyst_name") @db.VarChar(150)
+  supervisorName        String            @map("supervisor_name") @db.VarChar(150)
+  cluster               String            @db.VarChar(100)
+  technology            String            @db.VarChar(100)
+  regional              String            @db.VarChar(100)
+  tier                  CertificationTier @default(Bronze)
+  iqoScore              Decimal           @default(0) @map("iqo_score") @db.Decimal(5, 2)
+  reincidencias         Int               @default(0)
+  trainingsCompletedPct Decimal           @default(0) @map("trainings_completed_pct") @db.Decimal(5, 2)
+  daysWithoutDeviation  Int               @default(0) @map("days_without_deviation")
+  totalAudits           Int               @default(0) @map("total_audits")
+  avatarColor           String?           @default("bg-blue-600") @map("avatar_color") @db.VarChar(50)
+  validUntil            DateTime?         @map("valid_until") @db.Date
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  @@index([tier])
+  @@map("certifications")
+}
+
+model Notification {
+  id              String               @id
+  title           String               @db.VarChar(250)
+  message         String               @db.Text
+  severity        NotificationSeverity @default(info)
+  protocol        String?              @db.VarChar(50)
+  actionPlanId    String?              @map("action_plan_id")
+  actionPlan      ActionPlan?          @relation(fields: [actionPlanId], references: [id], onDelete: SetNull)
+  recipientName   String               @map("recipient_name") @db.VarChar(150)
+  recipientEmail  String?              @map("recipient_email") @db.VarChar(200)
+  read            Boolean              @default(false)
+  readAt          DateTime?            @map("read_at")
+  sentViaTeams    Boolean              @default(false) @map("sent_via_teams")
+  sentViaEmail    Boolean              @default(false) @map("sent_via_email")
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  @@index([severity])
+  @@index([read])
+  @@map("notifications")
+}
