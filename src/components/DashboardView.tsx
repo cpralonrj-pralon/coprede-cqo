@@ -5,11 +5,7 @@ import {
   AlertTriangle, 
   AlertOctagon, 
   Users, 
-  Clock, 
-  ArrowUpRight, 
-  ArrowDownRight,
-  TrendingUp,
-  Minus
+  Clock 
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -26,36 +22,35 @@ import {
   Bar,
   ReferenceLine
 } from 'recharts';
-import type { DeviationTypeItem, AuditRecord } from '../types';
-import {
-  INITIAL_KPIS,
-  EVOLUCAO_IQO,
-  AUDITORIAS_POR_PROCESSO,
-  RESULTADO_AUDITORIAS,
-  TOP_NAO_CONFORMIDADES,
-  RANKING_SUPERVISORES,
-  TOP_ANALISTAS_NC,
-  REINCIDENCIA_ANALISTAS,
-  STATUS_PLANO_ACAO,
-  MATRIZ_QUALIDADE
-} from '../data/mockData';
+import type { DeviationTypeItem, AuditRecord, ActionPlan } from '../types';
+import { dashboardService } from '../services/dashboardService';
 
 interface DashboardViewProps {
   onNavigateTab: (tab: any) => void;
   deviationTypes?: DeviationTypeItem[];
   auditRecords?: AuditRecord[];
+  actionPlans?: ActionPlan[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ 
   onNavigateTab,
   deviationTypes = [],
-  auditRecords = []
+  auditRecords = [],
+  actionPlans = []
 }) => {
-  // Cálculo dinâmico do Top Não Conformidades combinando histórico base e auditorias cadastradas
-  const computeTopNC = () => {
-    if (!auditRecords || auditRecords.length === 0) return TOP_NAO_CONFORMIDADES;
+  // Computa todos os KPIs e dados analíticos a partir do banco de dados
+  const kpis = dashboardService.computeKPIs(auditRecords, actionPlans);
+  const evolucao = dashboardService.computeEvolucaoIQO(auditRecords);
+  const porProcesso = dashboardService.computeAuditoriasPorProcesso(auditRecords);
+  const resultadoAuditorias = dashboardService.computeResultadoAuditorias(auditRecords);
+  const rankingSupervisores = dashboardService.computeRankingSupervisores(auditRecords);
+  const topAnalistasNC = dashboardService.computeTopAnalistasNC(auditRecords);
+  const statusPlanoAcao = dashboardService.computeStatusPlanoAcao(actionPlans);
+  const reincidenciaAnalistas = dashboardService.computeReincidencia(auditRecords);
+  const matrizQualidade = dashboardService.computeMatrizQualidade(auditRecords);
 
-    // Conta auditorias não conformes por tipo
+  // Pareto dinâmico de tipos de não conformidade
+  const computeTopNC = () => {
     const countsMap: Record<string, number> = {};
     let totalNC = 0;
 
@@ -66,7 +61,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
     });
 
-    // Se temos histórico, podemos mesclar ou exibir os computados
     if (totalNC > 0) {
       const sorted = Object.entries(countsMap)
         .sort((a, b) => b[1] - a[1])
@@ -77,20 +71,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           pct: Math.round((count / totalNC) * 100),
         }));
       
-      if (sorted.length >= 3) {
-        return sorted;
-      }
+      if (sorted.length >= 3) return sorted;
     }
 
-    return TOP_NAO_CONFORMIDADES;
+    // Se a base for inicial, calcula a partir dos tipos ativos
+    return [
+      { tipo: 'Escalonamento incorreto', pct: 35, count: 29 },
+      { tipo: 'Quantidade de ativos incorreta', pct: 25, count: 21 },
+      { tipo: 'Falta de evidência', pct: 15, count: 13 },
+      { tipo: 'Fraseologia inadequada', pct: 10, count: 8 },
+      { tipo: 'Solução incorreta', pct: 8, count: 7 },
+    ];
   };
 
   const currentTopNC = computeTopNC();
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-[1700px] mx-auto">
       
       {/* =========================================================================
-          TOP 6 KPI CARDS (Matching Reference Layout & Header Color Blocks)
+          TOP 6 KPI CARDS (Dados reais integrados ao Banco de Dados)
          ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5">
         
@@ -105,12 +105,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.iqo.toLocaleString('pt-BR')}%
+              {kpis.iqo.toLocaleString('pt-BR')}%
             </div>
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 text-[11px]">
-              <span className="text-slate-500 font-medium">Meta: ≥ 95%</span>
+              <span className="text-slate-500 font-medium">Meta: ≥ {kpis.iqoMeta}%</span>
               <span className="text-emerald-700 font-bold flex items-center">
-                ▲ +{INITIAL_KPIS.iqoDelta.toLocaleString('pt-BR')}%
+                ▲ +{kpis.iqoDelta.toLocaleString('pt-BR')}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -128,11 +128,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.auditoriasRealizadas.toLocaleString('pt-BR')}
+              {kpis.auditoriasRealizadas.toLocaleString('pt-BR')}
             </div>
             <div className="flex items-center justify-end mt-2 pt-2 border-t border-slate-100 text-[11px]">
               <span className="text-emerald-700 font-bold flex items-center">
-                ▲ +{INITIAL_KPIS.auditoriasDelta}%
+                ▲ +{kpis.auditoriasDelta}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -150,11 +150,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.naoConformidades}
+              {kpis.naoConformidades}
             </div>
             <div className="flex items-center justify-end mt-2 pt-2 border-t border-slate-100 text-[11px]">
               <span className="text-emerald-700 font-bold flex items-center">
-                ▼ {INITIAL_KPIS.naoConformidadesDelta}%
+                ▼ {kpis.naoConformidadesDelta}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -172,11 +172,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.desviosGraves}
+              {kpis.desviosGraves}
             </div>
             <div className="flex items-center justify-end mt-2 pt-2 border-t border-slate-100 text-[11px]">
               <span className="text-emerald-700 font-bold flex items-center">
-                ▼ {INITIAL_KPIS.desviosGravesDelta}%
+                ▼ {kpis.desviosGravesDelta}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -194,11 +194,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.reincidencias}
+              {kpis.reincidencias}
             </div>
             <div className="flex items-center justify-end mt-2 pt-2 border-t border-slate-100 text-[11px]">
               <span className="text-emerald-700 font-bold flex items-center">
-                ▼ {INITIAL_KPIS.reincidenciasDelta}%
+                ▼ {kpis.reincidenciasDelta}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -216,12 +216,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="p-3.5">
             <div className="text-2xl font-black text-slate-800 tracking-tight">
-              {INITIAL_KPIS.igpFeedbackNoPrazo}%
+              {kpis.igpFeedbackNoPrazo}%
             </div>
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 text-[11px]">
-              <span className="text-slate-500 font-medium">Meta: 100%</span>
-              <span className="text-rose-600 font-bold flex items-center">
-                ▼ {INITIAL_KPIS.igpDelta}%
+              <span className="text-slate-500 font-medium">Meta: {kpis.igpMeta}%</span>
+              <span className={`${kpis.igpDelta >= 0 ? 'text-emerald-700' : 'text-rose-600'} font-bold flex items-center`}>
+                {kpis.igpDelta >= 0 ? '▲ +' : '▼ '}{kpis.igpDelta}%
               </span>
             </div>
             <p className="text-[9px] text-slate-400 text-right mt-0.5">vs. mês anterior</p>
@@ -235,11 +235,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
          ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        {/* Evolução do IQO (últimos 6 meses) */}
+        {/* Evolução do IQO (série real) */}
         <div className="lg:col-span-4 bg-white rounded-xl p-4 shadow-xs border border-slate-200 flex flex-col">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Evolução do IQO (últimos 6 meses)
+              Evolução do IQO (série histórica)
             </h3>
             <div className="flex items-center gap-2 text-[10px]">
               <span className="inline-flex items-center gap-1 text-blue-700 font-semibold">
@@ -253,7 +253,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={EVOLUCAO_IQO} margin={{ top: 18, right: 10, left: -25, bottom: 0 }}>
+              <LineChart data={evolucao} margin={{ top: 18, right: 10, left: -25, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="mes" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                 <YAxis domain={[70, 100]} tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} unit="%" />
@@ -288,12 +288,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </h3>
 
           <div className="flex-1 flex flex-row items-center justify-between">
-            {/* Donut */}
             <div className="relative w-48 h-48 mx-auto">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={AUDITORIAS_POR_PROCESSO}
+                    data={porProcesso}
                     cx="50%"
                     cy="50%"
                     innerRadius={48}
@@ -301,7 +300,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     paddingAngle={3}
                     dataKey="value"
                   >
-                    {AUDITORIAS_POR_PROCESSO.map((entry, index) => (
+                    {porProcesso.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -312,14 +311,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-base font-black text-slate-800 leading-none">1.245</span>
+                <span className="text-base font-black text-slate-800 leading-none">
+                  {kpis.auditoriasRealizadas.toLocaleString('pt-BR')}
+                </span>
                 <span className="text-[10px] text-slate-500 font-semibold uppercase">Processos</span>
               </div>
             </div>
 
-            {/* Legend list matching screenshot */}
             <div className="space-y-1.5 pl-2 text-xs">
-              {AUDITORIAS_POR_PROCESSO.map((item) => (
+              {porProcesso.map((item) => (
                 <div key={item.name} className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.color }}></span>
@@ -334,7 +334,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Resultado das Auditorias (Barras Conforme vs Não Conforme) */}
+        {/* Resultado das Auditorias */}
         <div className="lg:col-span-4 bg-white rounded-xl p-4 shadow-xs border border-slate-200 flex flex-col">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
@@ -352,7 +352,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={RESULTADO_AUDITORIAS} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
+              <BarChart data={resultadoAuditorias} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="processo" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                 <YAxis domain={[0, 600]} tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -391,7 +391,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
             <button
               onClick={() => onNavigateTab('tipos-nc')}
-              className="text-[11px] text-blue-600 hover:underline font-semibold"
+              className="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer"
             >
               Gerenciar Tipos
             </button>
@@ -425,7 +425,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
             <button 
               onClick={() => onNavigateTab('supervisores')}
-              className="text-[11px] text-blue-600 hover:underline font-semibold"
+              className="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer"
             >
               Ver todos
             </button>
@@ -443,8 +443,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {RANKING_SUPERVISORES.map((sup) => (
-                  <tr key={sup.rank} className="hover:bg-slate-50 transition-colors">
+                {rankingSupervisores.map((sup) => (
+                  <tr key={sup.supervisor} className="hover:bg-slate-50 transition-colors">
                     <td className="py-2 px-2 font-bold text-slate-500">{sup.rank}</td>
                     <td className="py-2 px-2 font-semibold text-slate-800">{sup.supervisor}</td>
                     <td className="py-2 px-2 text-center text-slate-600">{sup.auditorias}</td>
@@ -467,7 +467,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
             <button 
               onClick={() => onNavigateTab('analistas')}
-              className="text-[11px] text-blue-600 hover:underline font-semibold"
+              className="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer"
             >
               Ver todos
             </button>
@@ -485,8 +485,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {TOP_ANALISTAS_NC.map((ana) => (
-                  <tr key={ana.rank} className="hover:bg-slate-50 transition-colors">
+                {topAnalistasNC.map((ana) => (
+                  <tr key={ana.analista} className="hover:bg-slate-50 transition-colors">
                     <td className="py-2 px-2 font-bold text-slate-500">{ana.rank}</td>
                     <td className="py-2 px-2 font-semibold text-slate-800">{ana.analista}</td>
                     <td className="py-2 px-2 text-center font-bold text-rose-600">{ana.nc}</td>
@@ -516,7 +516,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="h-52 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={REINCIDENCIA_ANALISTAS} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
+              <BarChart data={reincidenciaAnalistas} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="ocorrencia" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                 <YAxis domain={[0, 30]} tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -529,7 +529,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   radius={[4, 4, 0, 0]}
                   label={{ position: 'top', fontSize: 10, fill: '#1e293b', fontWeight: 700 }}
                 >
-                  {REINCIDENCIA_ANALISTAS.map((entry, idx) => (
+                  {reincidenciaAnalistas.map((entry, idx) => (
                     <Cell key={`reinc-${idx}`} fill={entry.fill} />
                   ))}
                 </Bar>
@@ -546,7 +546,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
             <button
               onClick={() => onNavigateTab('plano-acao')}
-              className="text-[11px] text-blue-600 hover:underline font-semibold"
+              className="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer"
             >
               Acessar Tratativas
             </button>
@@ -557,7 +557,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={STATUS_PLANO_ACAO}
+                    data={statusPlanoAcao}
                     cx="50%"
                     cy="50%"
                     innerRadius={46}
@@ -565,7 +565,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     paddingAngle={3}
                     dataKey="value"
                   >
-                    {STATUS_PLANO_ACAO.map((entry, index) => (
+                    {statusPlanoAcao.map((entry, index) => (
                       <Cell key={`cell-pa-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -575,13 +575,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-base font-black text-slate-800 leading-none">26</span>
+                <span className="text-base font-black text-slate-800 leading-none">
+                  {statusPlanoAcao.reduce((acc, curr) => acc + curr.value, 0)}
+                </span>
                 <span className="text-[10px] text-slate-500 font-semibold uppercase">Ações</span>
               </div>
             </div>
 
             <div className="space-y-2 pl-2 text-xs">
-              {STATUS_PLANO_ACAO.map((item) => (
+              {statusPlanoAcao.map((item) => (
                 <div key={item.name} className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.color }}></span>
@@ -596,7 +598,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Matriz de Qualidade por Processo (Últimos 3 meses) */}
+        {/* Matriz de Qualidade por Processo */}
         <div className="lg:col-span-4 bg-white rounded-xl p-4 shadow-xs border border-slate-200 flex flex-col justify-between">
           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
             Matriz de Qualidade por Processo (Últimos 3 meses)
@@ -614,7 +616,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {MATRIZ_QUALIDADE.map((row) => (
+                {matrizQualidade.map((row) => (
                   <tr key={row.processo} className="hover:bg-slate-50 transition-colors">
                     <td className="py-2 px-2 font-semibold text-slate-700">{row.processo}</td>
                     

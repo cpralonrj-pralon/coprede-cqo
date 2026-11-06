@@ -10,13 +10,14 @@ import { ProcessDetailView } from './components/ProcessDetailView';
 import { DeviationTypesView } from './components/DeviationTypesView';
 import { FooterBanner } from './components/FooterBanner';
 import { NewAuditModal } from './components/NewAuditModal';
-import { 
-  INITIAL_ACTION_PLANS, 
-  INITIAL_CERTIFICATIONS, 
-  INITIAL_NOTIFICATIONS 
-} from './data/mockData';
-import { INITIAL_AUDIT_RECORDS } from './data/mockAudits';
-import { deviationTypeService, DEFAULT_DEVIATION_TYPES } from './services/deviationTypeService';
+
+// Serviços Conectados ao Supabase (Zero Mocks)
+import { auditService } from './services/auditService';
+import { actionPlanService } from './services/actionPlanService';
+import { certificationService } from './services/certificationService';
+import { notificationService } from './services/notificationService';
+import { deviationTypeService } from './services/deviationTypeService';
+
 import type { 
   AuditRecord, 
   ActionPlan, 
@@ -26,35 +27,23 @@ import type {
   CreateDeviationTypeInput,
   UpdateDeviationTypeInput
 } from './types';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('visao-geral');
   const [selectedPeriod, setSelectedPeriod] = useState('Jun/2025');
   const [isNewAuditModalOpen, setIsNewAuditModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Core state
-  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>(INITIAL_AUDIT_RECORDS);
-  const [actionPlans, setActionPlans] = useState<ActionPlan[]>(INITIAL_ACTION_PLANS);
-  const [certifications, setCertifications] = useState<AnalystCertification[]>(INITIAL_CERTIFICATIONS);
-  const [notifications, setNotifications] = useState<NotificationAlert[]>(INITIAL_NOTIFICATIONS);
-  const [deviationTypes, setDeviationTypes] = useState<DeviationTypeItem[]>(DEFAULT_DEVIATION_TYPES);
+  // Estados Dinâmicos Alimentados pelo Supabase
+  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
+  const [actionPlans, setActionPlans] = useState<ActionPlan[]>([]);
+  const [certifications, setCertifications] = useState<AnalystCertification[]>([]);
+  const [notifications, setNotifications] = useState<NotificationAlert[]>([]);
+  const [deviationTypes, setDeviationTypes] = useState<DeviationTypeItem[]>([]);
   
   // Executive Toast notification
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'alert' } | null>(null);
-
-  // Carrega os tipos de não conformidade do service/repositório
-  useEffect(() => {
-    const loadDeviationTypes = async () => {
-      try {
-        const types = await deviationTypeService.getAll();
-        setDeviationTypes(types);
-      } catch (err) {
-        console.error('Erro ao carregar tipos de não conformidade:', err);
-      }
-    };
-    loadDeviationTypes();
-  }, []);
 
   const showToast = (message: string, type: 'success' | 'alert' = 'success') => {
     setToast({ message, type });
@@ -63,105 +52,114 @@ export function App() {
     }, 4500);
   };
 
+  // Carrega todas as entidades diretamente do Supabase na inicialização
+  const loadAllDataFromSupabase = async () => {
+    try {
+      setIsLoading(true);
+      const [types, audits, plans, certs, notifs] = await Promise.all([
+        deviationTypeService.getAll(),
+        auditService.getAll(),
+        actionPlanService.getAll(),
+        certificationService.getAll(),
+        notificationService.getAll(),
+      ]);
+
+      setDeviationTypes(types);
+      setAuditRecords(audits);
+      setActionPlans(plans);
+      setCertifications(certs);
+      setNotifications(notifs);
+    } catch (err) {
+      console.error('Erro ao carregar dados do Supabase:', err);
+      showToast('Erro ao sincronizar com o Supabase. Verifique a conexão.', 'alert');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAllDataFromSupabase();
+  }, []);
+
   // ==========================================
   // CRUD DE TIPOS DE NÃO CONFORMIDADE
   // ==========================================
   const handleAddDeviationType = async (input: CreateDeviationTypeInput) => {
     const newItem = await deviationTypeService.create(input);
     setDeviationTypes(prev => [newItem, ...prev]);
-    showToast(`Elemento "${newItem.name}" (${newItem.code}) incluído com sucesso no catálogo!`, 'success');
+    showToast(`Elemento "${newItem.name}" (${newItem.code}) gravado no Supabase!`, 'success');
   };
 
   const handleUpdateDeviationType = async (id: string, input: UpdateDeviationTypeInput) => {
     const updated = await deviationTypeService.update(id, input);
     setDeviationTypes(prev => prev.map(item => item.id === id ? updated : item));
-    showToast(`Elemento "${updated.name}" alterado com sucesso!`, 'success');
+    showToast(`Elemento "${updated.name}" atualizado no Supabase!`, 'success');
   };
 
   const handleDeleteDeviationType = async (id: string) => {
     const itemToDelete = deviationTypes.find(d => d.id === id);
     await deviationTypeService.delete(id);
     setDeviationTypes(prev => prev.filter(item => item.id !== id));
-    showToast(`Elemento "${itemToDelete?.name || id}" excluído com sucesso do catálogo.`, 'alert');
+    showToast(`Elemento "${itemToDelete?.name || id}" excluído no Supabase.`, 'alert');
   };
 
   const handleToggleActiveDeviationType = async (id: string) => {
     const toggled = await deviationTypeService.toggleActive(id);
     setDeviationTypes(prev => prev.map(item => item.id === id ? toggled : item));
-    showToast(`Elemento "${toggled.name}" foi ${toggled.active ? 'ativado' : 'inativado'}.`, 'success');
+    showToast(`Elemento "${toggled.name}" ${toggled.active ? 'ativado' : 'inativado'} no Supabase.`, 'success');
   };
 
   const handleResetDefaultsDeviationTypes = async () => {
     const defaults = await deviationTypeService.resetToDefaults();
     setDeviationTypes(defaults);
-    showToast('Catálogo de tipos de não conformidade restaurado para os padrões do COP Rede.', 'success');
+    showToast('Catálogo de tipos de não conformidade restaurado com sucesso.', 'success');
   };
 
-  // Record new audit with instant automated triggers
-  const handleNewAuditSubmit = (newAudit: Partial<AuditRecord>) => {
-    const auditId = `AUD-${Math.floor(8900 + Math.random() * 1000)}`;
-    const fullAudit: AuditRecord = {
-      id: auditId,
-      protocol: newAudit.protocol || `INC-${Math.floor(100000 + Math.random() * 900000)}`,
-      process: newAudit.process || 'Outages',
-      analyst: newAudit.analyst || 'João Silva',
-      supervisor: newAudit.supervisor || 'Carlos Mendes',
-      cluster: newAudit.cluster || 'Cluster Sudeste',
-      technology: newAudit.technology || 'GPON / FTTH',
-      regional: newAudit.regional || 'Regional SP/RJ',
-      score: newAudit.score || 100,
-      status: newAudit.status || 'Conforme',
-      deviationType: newAudit.deviationType,
-      date: newAudit.date || new Date().toISOString().split('T')[0],
-      observations: newAudit.observations || '',
-    };
+  // ==========================================
+  // AUDITORIAS & GATILHOS DE SLAS NO SUPABASE
+  // ==========================================
+  const handleNewAuditSubmit = async (newAudit: Partial<AuditRecord>) => {
+    try {
+      const selectedType = deviationTypes.find(d => d.name === newAudit.deviationType);
 
-    setAuditRecords(prev => [fullAudit, ...prev]);
+      const result = await auditService.create({
+        protocol: newAudit.protocol || `INC-${Math.floor(100000 + Math.random() * 900000)}`,
+        process: newAudit.process || 'Outages',
+        analyst: newAudit.analyst || 'João Silva',
+        supervisor: newAudit.supervisor || 'Carlos Mendes',
+        cluster: newAudit.cluster || 'Cluster Sudeste',
+        technology: newAudit.technology || 'GPON / FTTH',
+        regional: newAudit.regional || 'Regional SP/RJ',
+        score: newAudit.score || 100,
+        status: newAudit.status || 'Conforme',
+        deviationTypeId: selectedType?.id,
+        deviationType: newAudit.deviationType,
+        observations: newAudit.observations || '',
+        date: newAudit.date || new Date().toISOString().split('T')[0],
+      });
 
-    // Check if deviation exists: TRIGGER D0 AUTOMATIONS
-    if (fullAudit.status !== 'Conforme') {
-      const planId = `PA-2025-${Math.floor(1000 + Math.random() * 9000)}`;
-      
-      const newPlan: ActionPlan = {
-        id: planId,
-        auditId: fullAudit.id,
-        protocol: fullAudit.protocol,
-        analyst: fullAudit.analyst,
-        supervisor: fullAudit.supervisor,
-        process: fullAudit.process,
-        deviationType: fullAudit.deviationType || 'Desvio Operacional',
-        description: fullAudit.observations,
-        rootCause: 'Análise de causa raiz preliminar em andamento pelo supervisor.',
-        what: `Revisão do procedimento operacional do processo ${fullAudit.process}`,
-        why: 'Prevenir reincidência e assegurar conformidade do COP Rede',
-        who: fullAudit.supervisor,
-        when: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        daysOpen: 0,
-        escalationLevel: 0,
-        status: 'Em andamento',
-        createdAt: fullAudit.date,
-      };
+      // Recarrega os dados do Supabase para refletir os relacionamentos
+      setAuditRecords(prev => [result.audit, ...prev]);
 
-      const newNotif: NotificationAlert = {
-        id: `NOTIF-${Date.now()}`,
-        timestamp: 'Agora mesmo',
-        title: `🚨 Alerta Automático: Desvio em ${fullAudit.process}`,
-        message: `Novo desvio registrado para ${fullAudit.analyst}. Plano de Ação ${planId} gerado e gestor ${fullAudit.supervisor} notificado.`,
-        severity: fullAudit.status === 'Desvio Grave' ? 'critical' : 'warning',
-        protocol: fullAudit.protocol,
-        recipient: fullAudit.supervisor,
-        read: false,
-      };
-
-      setActionPlans(prev => [newPlan, ...prev]);
-      setNotifications(prev => [newNotif, ...prev]);
-      showToast(`Desvio detectado! Alerta gerado e Plano de Ação ${planId} criado automaticamente para o gestor.`, 'alert');
-    } else {
-      showToast(`Auditoria ${fullAudit.protocol} registrada com 100% de conformidade!`, 'success');
+      if (result.actionPlanId) {
+        // Recarrega planos e notificações gerados pelo trigger D0
+        const [updatedPlans, updatedNotifs] = await Promise.all([
+          actionPlanService.getAll(),
+          notificationService.getAll(),
+        ]);
+        setActionPlans(updatedPlans);
+        setNotifications(updatedNotifs);
+        showToast(`Desvio gravado no Supabase! Plano ${result.actionPlanId} e Alerta D0 criados automaticamente.`, 'alert');
+      } else {
+        showToast(`Auditoria ${result.audit.protocol} gravada com 100% de conformidade no Supabase!`, 'success');
+      }
+    } catch (err: any) {
+      console.error('Erro ao salvar auditoria no Supabase:', err);
+      showToast(err.message || 'Erro ao salvar auditoria no Supabase.', 'alert');
     }
   };
 
-  // Simulators for SLA triggers
+  // Simulação de Desvio D0
   const handleSimulateDeviation = () => {
     handleNewAuditSubmit({
       protocol: `INC-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -179,63 +177,65 @@ export function App() {
     });
   };
 
-  const handleSimulateEscalateD5 = () => {
-    setActionPlans(prev => prev.map((plan, index) => {
-      if (index === 0) {
-        return {
-          ...plan,
-          daysOpen: 6,
-          escalationLevel: 1,
-          status: 'Escalada D+5',
-        };
-      }
-      return plan;
-    }));
+  // Simulação de Escalonamento D+5 no Supabase
+  const handleSimulateEscalateD5 = async () => {
+    if (actionPlans.length === 0) return;
+    const targetPlan = actionPlans[0];
 
-    const alertD5: NotificationAlert = {
-      id: `NOTIF-D5-${Date.now()}`,
-      timestamp: 'Agora mesmo',
+    await actionPlanService.updateEscalation(targetPlan.id, 6, 1, 'Escalada D+5');
+    await notificationService.create({
       title: '⚠️ Escalonamento D+5: 5 dias sem tratativa do gestor',
-      message: 'Plano de ação sem apontamento de causa raiz há 6 dias. Supervisor advertido.',
+      message: `Plano ${targetPlan.id} (${targetPlan.analyst}) sem causa raiz há 6 dias. Supervisor advertido.`,
       severity: 'warning',
-      recipient: 'Carlos Mendes (Supervisor)',
+      protocol: targetPlan.protocol,
+      recipient: targetPlan.supervisor,
       read: false,
-    };
+    });
 
-    setNotifications(prev => [alertD5, ...prev]);
-    showToast('Gatilho D+5 acionado! Alerta de escalonamento enviado ao supervisor imediato.', 'alert');
+    const [updatedPlans, updatedNotifs] = await Promise.all([
+      actionPlanService.getAll(),
+      notificationService.getAll(),
+    ]);
+    setActionPlans(updatedPlans);
+    setNotifications(updatedNotifs);
+
+    showToast('Gatilho D+5 acionado no Supabase! Alerta de escalonamento enviado ao supervisor imediato.', 'alert');
   };
 
-  const handleSimulateEscalateD10 = () => {
-    setActionPlans(prev => prev.map((plan, index) => {
-      if (index === 0) {
-        return {
-          ...plan,
-          daysOpen: 11,
-          escalationLevel: 2,
-          status: 'Escalada D+10',
-        };
-      }
-      return plan;
-    }));
+  // Simulação de Escalonamento D+10 no Supabase
+  const handleSimulateEscalateD10 = async () => {
+    if (actionPlans.length === 0) return;
+    const targetPlan = actionPlans[0];
 
-    const alertD10: NotificationAlert = {
-      id: `NOTIF-D10-${Date.now()}`,
-      timestamp: 'Agora mesmo',
+    await actionPlanService.updateEscalation(targetPlan.id, 11, 2, 'Escalada D+10');
+    await notificationService.create({
       title: '🚨 Escalonamento D+10: Desvio sem resolução',
-      message: 'Plano atingiu 11 dias sem validação de fechamento. Escalonado para Gerência Executiva COP.',
+      message: `Plano ${targetPlan.id} atingiu 11 dias sem resolução. Escalonado para Gerência Executiva COP.`,
       severity: 'escalation',
+      protocol: targetPlan.protocol,
       recipient: 'Gerência Executiva de Operações',
       read: false,
-    };
+    });
 
-    setNotifications(prev => [alertD10, ...prev]);
-    showToast('Gatilho D+10 acionado! Desvio escalado para a Diretoria / Gerência Executiva.', 'alert');
+    const [updatedPlans, updatedNotifs] = await Promise.all([
+      actionPlanService.getAll(),
+      notificationService.getAll(),
+    ]);
+    setActionPlans(updatedPlans);
+    setNotifications(updatedNotifs);
+
+    showToast('Gatilho D+10 acionado no Supabase! Desvio escalado para a Diretoria / Gerência Executiva.', 'alert');
   };
 
-  const handleCompletePlan = (id: string) => {
-    setActionPlans(prev => prev.map(p => p.id === id ? { ...p, status: 'Concluídas' } : p));
-    showToast(`Plano de Ação ${id} concluído e auditado pelo CQO com sucesso!`, 'success');
+  // Conclusão de Plano de Ação no Supabase
+  const handleCompletePlan = async (id: string) => {
+    try {
+      await actionPlanService.complete(id);
+      setActionPlans(prev => prev.map(p => p.id === id ? { ...p, status: 'Concluídas' } : p));
+      showToast(`Plano de Ação ${id} concluído e validado no Supabase!`, 'success');
+    } catch (err: any) {
+      showToast('Erro ao concluir plano no Supabase.', 'alert');
+    }
   };
 
   const openActionPlansCount = actionPlans.filter(p => p.status !== 'Concluídas').length;
@@ -280,140 +280,154 @@ export function App() {
             </div>
           )}
 
-          {/* VIEW: VISÃO GERAL (O Dashboard da imagem) */}
-          {currentTab === 'visao-geral' && (
-            <DashboardView 
-              onNavigateTab={setCurrentTab} 
-              deviationTypes={deviationTypes}
-              auditRecords={auditRecords}
-            />
-          )}
+          {/* Loading Indicator */}
+          {isLoading ? (
+            <div className="h-full flex flex-col items-center justify-center py-24 text-slate-500">
+              <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-3" />
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Sincronizando com o Supabase...
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">Carregando governança, auditorias e relacionamentos em tempo real</p>
+            </div>
+          ) : (
+            <>
+              {/* VIEW: VISÃO GERAL (Dashboard Executivo Real) */}
+              {currentTab === 'visao-geral' && (
+                <DashboardView 
+                  onNavigateTab={setCurrentTab} 
+                  deviationTypes={deviationTypes}
+                  auditRecords={auditRecords}
+                  actionPlans={actionPlans}
+                />
+              )}
 
-          {/* VIEW: CERTIFICAÇÃO (Bronze, Prata, Ouro, Diamante) */}
-          {currentTab === 'certificacao' && (
-            <CertificationView certifications={certifications} />
-          )}
+              {/* VIEW: CERTIFICAÇÃO (Bronze, Prata, Ouro, Diamante) */}
+              {currentTab === 'certificacao' && (
+                <CertificationView certifications={certifications} />
+              )}
 
-          {/* VIEW: AUTOMAÇÕES & SLAS (D0 -> D+5 -> D+10) */}
-          {currentTab === 'automacoes' && (
-            <AutomationsView 
-              notifications={notifications}
-              actionPlans={actionPlans}
-              onSimulateDeviation={handleSimulateDeviation}
-              onSimulateEscalateD5={handleSimulateEscalateD5}
-              onSimulateEscalateD10={handleSimulateEscalateD10}
-            />
-          )}
+              {/* VIEW: AUTOMAÇÕES & SLAS (D0 -> D+5 -> D+10) */}
+              {currentTab === 'automacoes' && (
+                <AutomationsView 
+                  notifications={notifications}
+                  actionPlans={actionPlans}
+                  onSimulateDeviation={handleSimulateDeviation}
+                  onSimulateEscalateD5={handleSimulateEscalateD5}
+                  onSimulateEscalateD10={handleSimulateEscalateD10}
+                />
+              )}
 
-          {/* VIEW: PLANOS DE AÇÃO (5W2H) */}
-          {currentTab === 'plano-acao' && (
-            <ActionPlansView 
-              actionPlans={actionPlans}
-              onCompletePlan={handleCompletePlan}
-            />
-          )}
+              {/* VIEW: PLANOS DE AÇÃO (5W2H) */}
+              {currentTab === 'plano-acao' && (
+                <ActionPlansView 
+                  actionPlans={actionPlans}
+                  onCompletePlan={handleCompletePlan}
+                />
+              )}
 
-          {/* VIEW: RELATÓRIOS (Exportação PDF e Excel) */}
-          {currentTab === 'relatorios' && (
-            <ReportsView auditRecords={auditRecords} />
-          )}
+              {/* VIEW: RELATÓRIOS (Exportação PDF e Excel) */}
+              {currentTab === 'relatorios' && (
+                <ReportsView auditRecords={auditRecords} />
+              )}
 
-          {/* VIEW: TIPOS E ELEMENTOS DE NÃO CONFORMIDADE (CRUD COMPLETO) */}
-          {currentTab === 'tipos-nc' && (
-            <DeviationTypesView 
-              deviationTypes={deviationTypes}
-              auditRecords={auditRecords}
-              onAddDeviationType={handleAddDeviationType}
-              onUpdateDeviationType={handleUpdateDeviationType}
-              onDeleteDeviationType={handleDeleteDeviationType}
-              onToggleActive={handleToggleActiveDeviationType}
-              onResetDefaults={handleResetDefaultsDeviationTypes}
-            />
-          )}
+              {/* VIEW: TIPOS E ELEMENTOS DE NÃO CONFORMIDADE (CRUD COMPLETO) */}
+              {currentTab === 'tipos-nc' && (
+                <DeviationTypesView 
+                  deviationTypes={deviationTypes}
+                  auditRecords={auditRecords}
+                  onAddDeviationType={handleAddDeviationType}
+                  onUpdateDeviationType={handleUpdateDeviationType}
+                  onDeleteDeviationType={handleDeleteDeviationType}
+                  onToggleActive={handleToggleActiveDeviationType}
+                  onResetDefaults={handleResetDefaultsDeviationTypes}
+                />
+              )}
 
-          {/* PROCESS VIEWS */}
-          {currentTab === 'outages' && (
-            <ProcessDetailView 
-              title="Outages"
-              category="Processo Crítico"
-              description="Acompanhamento da qualidade operacional no isolamento, contingenciamento e restabelecimento de incidentes de rede de alta severidade."
-              records={auditRecords.filter(r => r.process === 'Outages')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {/* PROCESS VIEWS */}
+              {currentTab === 'outages' && (
+                <ProcessDetailView 
+                  title="Outages"
+                  category="Processo Crítico"
+                  description="Acompanhamento da qualidade operacional no isolamento, contingenciamento e restabelecimento de incidentes de rede de alta severidade."
+                  records={auditRecords.filter(r => r.process === 'Outages')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'acionamentos' && (
-            <ProcessDetailView 
-              title="Acionamentos"
-              category="Campo e Infraestrutura"
-              description="Auditoria de acionamento tempestivo de equipes de campo, validação de SLA e preenchimento de checklist de despacho."
-              records={auditRecords.filter(r => r.process === 'Acionamentos')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'acionamentos' && (
+                <ProcessDetailView 
+                  title="Acionamentos"
+                  category="Campo e Infraestrutura"
+                  description="Auditoria de acionamento tempestivo de equipes de campo, validação de SLA e preenchimento de checklist de despacho."
+                  records={auditRecords.filter(r => r.process === 'Acionamentos')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'escalonamentos' && (
-            <ProcessDetailView 
-              title="Escalonamentos"
-              category="Fluxo de Tratativa"
-              description="Controle de rotas de acionamento N2, N3 e parceiros terceiros sem retenção indevida ou encaminhamento sem triagem técnica."
-              records={auditRecords.filter(r => r.process === 'Escalonamentos')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'escalonamentos' && (
+                <ProcessDetailView 
+                  title="Escalonamentos"
+                  category="Fluxo de Tratativa"
+                  description="Controle de rotas de acionamento N2, N3 e parceiros terceiros sem retenção indevida ou encaminhamento sem triagem técnica."
+                  records={auditRecords.filter(r => r.process === 'Escalonamentos')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'baixas-offline' && (
-            <ProcessDetailView 
-              title="Baixas Offline"
-              category="Encerramento de Chamados"
-              description="Controle rigoroso dos encerramentos offline, conferência da quantidade de elementos restabelecidos e testes de certificação."
-              records={auditRecords.filter(r => r.process === 'Baixas Offline')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'baixas-offline' && (
+                <ProcessDetailView 
+                  title="Baixas Offline"
+                  category="Encerramento de Chamados"
+                  description="Controle rigoroso dos encerramentos offline, conferência da quantidade de elementos restabelecidos e testes de certificação."
+                  records={auditRecords.filter(r => r.process === 'Baixas Offline')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'analistas' && (
-            <CertificationView certifications={certifications} />
-          )}
+              {currentTab === 'analistas' && (
+                <CertificationView certifications={certifications} />
+              )}
 
-          {currentTab === 'supervisores' && (
-            <ProcessDetailView 
-              title="Governança de Supervisores"
-              category="Liderança Operacional"
-              description="Acompanhamento individualizado de IQO por equipe, tempo médio de resposta aos planos de ação e redução de reincidências."
-              records={auditRecords}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'supervisores' && (
+                <ProcessDetailView 
+                  title="Governança de Supervisores"
+                  category="Liderança Operacional"
+                  description="Acompanhamento individualizado de IQO por equipe, tempo médio de resposta aos planos de ação e redução de reincidências."
+                  records={auditRecords}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'reincidencia' && (
-            <ProcessDetailView 
-              title="Matriz de Reincidência"
-              category="Prevenção de Falhas"
-              description="Mapeamento de desvios repetidos pelo mesmo analista ou processo em janela de 30 dias para reciclagem direcionada."
-              records={auditRecords.filter(r => r.status !== 'Conforme')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'reincidencia' && (
+                <ProcessDetailView 
+                  title="Matriz de Reincidência"
+                  category="Prevenção de Falhas"
+                  description="Mapeamento de desvios repetidos pelo mesmo analista ou processo em janela de 30 dias para reciclagem direcionada."
+                  records={auditRecords.filter(r => r.status !== 'Conforme')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'tendencias' && (
-            <ProcessDetailView 
-              title="Tendências e Previsibilidade"
-              category="Analytics Avançado"
-              description="Curvas preditivas de aderência operacional e correlação entre treinamentos e redução de falhas de processo."
-              records={auditRecords}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
-          )}
+              {currentTab === 'tendencias' && (
+                <ProcessDetailView 
+                  title="Tendências e Previsibilidade"
+                  category="Analytics Avançado"
+                  description="Curvas preditivas de aderência operacional e correlação entre treinamentos e redução de falhas de processo."
+                  records={auditRecords}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
 
-          {currentTab === 'fcca' && (
-            <ProcessDetailView 
-              title="FCCA (Failure Cause & Corrective Action)"
-              category="Causa Raiz & Engenharia"
-              description="Comitê de falhas graves, análise de 5 porquês e retroalimentação dos procedimentos operacionais padrão (POP)."
-              records={auditRecords.filter(r => r.status === 'Desvio Grave')}
-              onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
-            />
+              {currentTab === 'fcca' && (
+                <ProcessDetailView 
+                  title="FCCA (Failure Cause & Corrective Action)"
+                  category="Causa Raiz & Engenharia"
+                  description="Comitê de falhas graves, análise de 5 porquês e retroalimentação dos procedimentos operacionais padrão (POP)."
+                  records={auditRecords.filter(r => r.status === 'Desvio Grave')}
+                  onOpenNewAudit={() => setIsNewAuditModalOpen(true)}
+                />
+              )}
+            </>
           )}
 
         </main>
